@@ -1,0 +1,1092 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>鼠标轨迹追踪</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --fg: #e8e6e3;
+    --muted: #5a5a6e;
+    --accent: #ff6b35;
+    --card: rgba(18, 18, 28, 0.85);
+    --border: rgba(255, 255, 255, 0.06);
+    --glow: rgba(255, 107, 53, 0.3);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'Noto Sans SC', sans-serif;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+    cursor: none;
+  }
+  canvas#trailCanvas {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 1;
+  }
+  .bg-grid {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
+    background-size: 60px 60px;
+    pointer-events: none;
+  }
+  .bg-glow {
+    position: fixed;
+    z-index: 0;
+    border-radius: 50%;
+    filter: blur(120px);
+    pointer-events: none;
+    animation: drift 20s ease-in-out infinite alternate;
+  }
+  .bg-glow.g1 {
+    width: 500px; height: 500px;
+    background: rgba(255, 107, 53, 0.04);
+    top: -100px; left: -100px;
+  }
+  .bg-glow.g2 {
+    width: 400px; height: 400px;
+    background: rgba(0, 210, 180, 0.03);
+    bottom: -100px; right: -100px;
+    animation-delay: -10s;
+  }
+  @keyframes drift {
+    0% { transform: translate(0, 0) scale(1); }
+    100% { transform: translate(80px, 60px) scale(1.2); }
+  }
+  .cursor-dot {
+    position: fixed;
+    width: 8px; height: 8px;
+    background: var(--accent);
+    border-radius: 50%;
+    z-index: 1000;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 15px var(--accent), 0 0 40px var(--glow);
+    transition: width 0.15s, height 0.15s, background 0.3s, box-shadow 0.3s;
+  }
+  .cursor-dot.clicking { width: 16px; height: 16px; }
+  .cursor-ring {
+    position: fixed;
+    width: 40px; height: 40px;
+    border: 1.5px solid rgba(255,107,53,0.4);
+    border-radius: 50%;
+    z-index: 999;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    transition: width 0.25s ease-out, height 0.25s ease-out, border-color 0.3s;
+  }
+  .cursor-ring.clicking { width: 28px; height: 28px; border-color: rgba(255,107,53,0.8); }
+  .panel {
+    position: fixed;
+    top: 24px; right: 24px;
+    z-index: 100;
+    background: var(--card);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    width: 280px;
+    cursor: default;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+    transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s;
+  }
+  .panel.collapsed {
+    transform: translateX(calc(100% + 40px));
+    opacity: 0;
+    pointer-events: none;
+  }
+  .panel-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .panel-title i { font-size: 14px; }
+  .control-group { margin-bottom: 18px; }
+  .control-label {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .control-label span.val {
+    color: var(--fg);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 11px;
+  }
+  .mode-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .mode-btn {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 8px;
+    color: var(--muted);
+    font-size: 11px;
+    font-family: 'Noto Sans SC', sans-serif;
+    cursor: pointer;
+    transition: all 0.25s;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+  .mode-btn i { font-size: 16px; transition: color 0.25s, transform 0.25s; }
+  .mode-btn:hover {
+    background: rgba(255,255,255,0.06);
+    border-color: rgba(255,255,255,0.12);
+    color: var(--fg);
+  }
+  .mode-btn:hover i { transform: scale(1.15); }
+  .mode-btn.active {
+    background: rgba(255, 107, 53, 0.1);
+    border-color: rgba(255, 107, 53, 0.4);
+    color: var(--accent);
+    box-shadow: 0 0 20px rgba(255,107,53,0.08);
+  }
+  .mode-btn.active i { color: var(--accent); }
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 4px;
+    outline: none;
+    cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 10px var(--glow);
+    cursor: pointer;
+    transition: transform 0.15s;
+  }
+  input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+  .action-row { display: flex; gap: 8px; margin-top: 6px; }
+  .action-btn {
+    flex: 1;
+    padding: 10px 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: rgba(255,255,255,0.03);
+    color: var(--muted);
+    font-size: 12px;
+    font-family: 'Noto Sans SC', sans-serif;
+    cursor: pointer;
+    transition: all 0.25s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .action-btn:hover {
+    background: rgba(255,255,255,0.06);
+    color: var(--fg);
+    border-color: rgba(255,255,255,0.12);
+  }
+  .action-btn.danger:hover {
+    background: rgba(255, 60, 60, 0.1);
+    border-color: rgba(255, 60, 60, 0.3);
+    color: #ff5252;
+  }
+  .toggle-panel {
+    position: fixed;
+    top: 24px; right: 24px;
+    z-index: 101;
+    width: 44px; height: 44px;
+    border-radius: 12px;
+    background: var(--card);
+    backdrop-filter: blur(24px);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 16px;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.25s;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  }
+  .toggle-panel:hover { color: var(--accent); border-color: rgba(255,107,53,0.3); }
+  .toggle-panel.visible { display: flex; }
+  .stats {
+    position: fixed;
+    bottom: 24px; left: 24px;
+    z-index: 100;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    color: var(--muted);
+    display: flex;
+    gap: 24px;
+    cursor: default;
+  }
+  .stat-item { display: flex; align-items: center; gap: 6px; }
+  .stat-item .stat-val { color: var(--fg); font-weight: 700; }
+  .stat-dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--glow);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+  .hint {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 50;
+    text-align: center;
+    pointer-events: none;
+    transition: opacity 1s;
+  }
+  .hint-text {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 14px;
+    font-weight: 400;
+    letter-spacing: 6px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.12);
+    animation: hintPulse 3s ease-in-out infinite;
+  }
+  @keyframes hintPulse {
+    0%, 100% { opacity: 0.12; }
+    50% { opacity: 0.25; }
+  }
+  .hint.hidden { opacity: 0; }
+  @media (max-width: 640px) {
+    .panel { width: 240px; padding: 18px; top: 16px; right: 16px; }
+    .stats { bottom: 16px; left: 16px; gap: 16px; font-size: 9px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="bg-grid"></div>
+<div class="bg-glow g1"></div>
+<div class="bg-glow g2"></div>
+<canvas id="trailCanvas"></canvas>
+<div class="cursor-dot" id="cursorDot"></div>
+<div class="cursor-ring" id="cursorRing"></div>
+<div class="hint" id="hint"><div class="hint-text">移动鼠标开始绘制</div></div>
+<div class="panel" id="panel">
+  <div class="panel-title"><i class="fas fa-sliders-h"></i> 轨迹控制</div>
+  <div class="control-group">
+    <div class="control-label">轨迹模式</div>
+    <div class="mode-grid">
+      <button class="mode-btn active" data-mode="flame" aria-label="火焰模式"><i class="fas fa-fire"></i>火焰</button>
+      <button class="mode-btn" data-mode="stardust" aria-label="星尘模式"><i class="fas fa-star"></i>星尘</button>
+      <button class="mode-btn" data-mode="neon" aria-label="霓虹模式"><i class="fas fa-bolt"></i>霓虹</button>
+      <button class="mode-btn" data-mode="aurora" aria-label="极光模式"><i class="fas fa-rainbow"></i>极光</button>
+      <button class="mode-btn" data-mode="ink" aria-label="水墨模式"><i class="fas fa-pen-nib"></i>水墨</button>
+      <button class="mode-btn" data-mode="galaxy" aria-label="星河模式"><i class="fas fa-meteor"></i>星河</button>
+    </div>
+  </div>
+  <div class="control-group">
+    <div class="control-label">粒子密度 <span class="val" id="densityVal">5</span></div>
+    <input type="range" id="density" min="1" max="15" value="5" aria-label="粒子密度">
+  </div>
+  <div class="control-group">
+    <div class="control-label">轨迹寿命 <span class="val" id="lifetimeVal">60</span></div>
+    <input type="range" id="lifetime" min="20" max="150" value="60" aria-label="轨迹寿命">
+  </div>
+  <div class="control-group">
+    <div class="control-label">粒子大小 <span class="val" id="sizeVal">4</span></div>
+    <input type="range" id="psize" min="1" max="12" value="4" aria-label="粒子大小">
+  </div>
+  <div class="control-group">
+    <div class="control-label">扩散力度 <span class="val" id="spreadVal">2.0</span></div>
+    <input type="range" id="spread" min="0" max="60" value="20" aria-label="扩散力度">
+  </div>
+  <div class="action-row">
+    <button class="action-btn" id="btnClear" aria-label="清除画布"><i class="fas fa-eraser"></i> 清除</button>
+    <button class="action-btn" id="btnHide" aria-label="隐藏面板"><i class="fas fa-eye-slash"></i> 隐藏</button>
+  </div>
+</div>
+<button class="toggle-panel" id="togglePanel" aria-label="显示控制面板"><i class="fas fa-cog"></i></button>
+<div class="stats">
+  <div class="stat-item"><div class="stat-dot"></div> 粒子数 <span class="stat-val" id="statCount">0</span></div>
+  <div class="stat-item">FPS <span class="stat-val" id="statFps">60</span></div>
+  <div class="stat-item">速度 <span class="stat-val" id="statSpeed">0</span></div>
+</div>
+
+<script>
+// ========== 画布初始化 ==========
+const canvas = document.getElementById('trailCanvas');
+const ctx = canvas.getContext('2d');
+let W, H;
+function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+resize();
+window.addEventListener('resize', resize);
+
+// ========== 状态变量 ==========
+let mouseX = W / 2, mouseY = H / 2;
+let prevMouseX = mouseX, prevMouseY = mouseY;
+let mouseSpeed = 0;
+let isMoving = false;
+let isMouseDown = false;
+let hasInteracted = false;
+let idleTime = 0; // 鼠标静止时长（帧数）
+const IDLE_THRESHOLD = 40; // 超过此帧数视为静止
+
+let currentMode = 'flame';
+let particleDensity = 5;
+let particleLifetime = 60;
+let particleSize = 4;
+let spreadForce = 2.0;
+
+let particles = [];
+const MAX_PARTICLES = 10000;
+let frameCount = 0;
+let lastFpsTime = performance.now();
+let currentFps = 60;
+let globalTime = 0; // 全局时间计数器
+
+// ========== 轨道粒子（鼠标静止时环绕） ==========
+let orbitParticles = [];
+const ORBIT_COUNT = 3; // 轨道环数
+
+function initOrbitParticles() {
+  orbitParticles = [];
+  for (let ring = 0; ring < ORBIT_COUNT; ring++) {
+    const count = 8 + ring * 4;
+    const radius = 50 + ring * 35;
+    const speed = (0.008 + ring * 0.005) * (ring % 2 === 0 ? 1 : -1);
+    const tilt = (ring * 0.4) - 0.4; // 每个环不同倾斜角
+    for (let i = 0; i < count; i++) {
+      orbitParticles.push({
+        ring,
+        angle: (i / count) * Math.PI * 2,
+        radius,
+        speed,
+        tilt,
+        size: 2.5 - ring * 0.4,
+        phaseOffset: Math.random() * Math.PI * 2
+      });
+    }
+  }
+}
+initOrbitParticles();
+
+// ========== 背景环境粒子 ==========
+let ambientParticles = [];
+const AMBIENT_COUNT = 50;
+
+function initAmbientParticles() {
+  ambientParticles = [];
+  for (let i = 0; i < AMBIENT_COUNT; i++) {
+    ambientParticles.push({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      vx: (Math.random() - 0.5) * 0.3,
+      vy: (Math.random() - 0.5) * 0.3,
+      size: Math.random() * 2 + 0.5,
+      alpha: Math.random() * 0.15 + 0.03,
+      phase: Math.random() * Math.PI * 2,
+      freq: 0.005 + Math.random() * 0.01
+    });
+  }
+}
+initAmbientParticles();
+
+// ========== 模式颜色配置 ==========
+const modeConfigs = {
+  flame: {
+    colors: ['#ff6b35', '#ff4500', '#ff8c00', '#ffd700', '#ff1744'],
+    glowColor: 'rgba(255, 107, 53, 0.15)',
+    cursorColor: '#ff6b35',
+    cursorGlow: 'rgba(255, 107, 53, 0.4)',
+    ringColor: 'rgba(255, 107, 53, 0.35)',
+    orbitColor: 'rgba(255, 140, 0, ',
+    ambientColor: 'rgba(255, 107, 53, ',
+    gravity: -0.08, friction: 0.97, sizeVar: 0.6, shape: 'circle'
+  },
+  stardust: {
+    colors: ['#fff8e1', '#ffe082', '#ffcc02', '#ffffff', '#ffd54f'],
+    glowColor: 'rgba(255, 204, 2, 0.12)',
+    cursorColor: '#ffd700',
+    cursorGlow: 'rgba(255, 215, 0, 0.4)',
+    ringColor: 'rgba(255, 215, 0, 0.3)',
+    orbitColor: 'rgba(255, 215, 0, ',
+    ambientColor: 'rgba(255, 224, 130, ',
+    gravity: 0.02, friction: 0.985, sizeVar: 0.8, shape: 'star'
+  },
+  neon: {
+    colors: ['#00ffff', '#ff00ff', '#00ff88', '#ffff00', '#ff3366'],
+    glowColor: 'rgba(0, 255, 255, 0.12)',
+    cursorColor: '#00ffff',
+    cursorGlow: 'rgba(0, 255, 255, 0.5)',
+    ringColor: 'rgba(0, 255, 255, 0.35)',
+    orbitColor: 'rgba(0, 255, 255, ',
+    ambientColor: 'rgba(0, 255, 200, ',
+    gravity: 0, friction: 0.96, sizeVar: 0.3, shape: 'circle'
+  },
+  aurora: {
+    colors: ['#00e5ff', '#76ff03', '#e040fb', '#00bfa5', '#d500f9'],
+    glowColor: 'rgba(0, 229, 255, 0.1)',
+    cursorColor: '#00e5ff',
+    cursorGlow: 'rgba(0, 229, 255, 0.4)',
+    ringColor: 'rgba(0, 229, 255, 0.3)',
+    orbitColor: 'rgba(118, 255, 3, ',
+    ambientColor: 'rgba(0, 229, 255, ',
+    gravity: -0.03, friction: 0.98, sizeVar: 0.5, shape: 'circle'
+  },
+  ink: {
+    colors: ['#cfd8dc', '#b0bec5', '#90a4ae', '#ffffff', '#78909c'],
+    glowColor: 'rgba(207, 216, 220, 0.08)',
+    cursorColor: '#cfd8dc',
+    cursorGlow: 'rgba(207, 216, 220, 0.3)',
+    ringColor: 'rgba(207, 216, 220, 0.25)',
+    orbitColor: 'rgba(176, 190, 197, ',
+    ambientColor: 'rgba(144, 164, 174, ',
+    gravity: 0.15, friction: 0.94, sizeVar: 1.2, shape: 'circle'
+  },
+  galaxy: {
+    colors: ['#e1bee7', '#b388ff', '#8c9eff', '#82b1ff', '#ea80fc'],
+    glowColor: 'rgba(179, 136, 255, 0.1)',
+    cursorColor: '#b388ff',
+    cursorGlow: 'rgba(179, 136, 255, 0.4)',
+    ringColor: 'rgba(179, 136, 255, 0.3)',
+    orbitColor: 'rgba(140, 158, 255, ',
+    ambientColor: 'rgba(179, 136, 255, ',
+    gravity: 0, friction: 0.975, sizeVar: 0.7, shape: 'star'
+  }
+};
+
+// ========== 粒子类 ==========
+class Particle {
+  constructor(x, y, vx, vy, color, size, life, shape) {
+    this.x = x; this.y = y;
+    this.vx = vx; this.vy = vy;
+    this.color = color;
+    this.size = Math.max(0.5, size);
+    this.maxLife = life; this.life = life;
+    this.shape = shape;
+    this.rotation = Math.random() * Math.PI * 2;
+    this.rotSpeed = (Math.random() - 0.5) * 0.15;
+  }
+  update(config) {
+    this.vx *= config.friction;
+    this.vy *= config.friction;
+    this.vy += config.gravity;
+    this.x += this.vx;
+    this.y += this.vy;
+    this.life--;
+    this.rotation += this.rotSpeed;
+    return this.life > 0;
+  }
+  draw(ctx) {
+    const t = this.life / this.maxLife;
+    const alpha = t * t;
+    const s = Math.max(0.5, this.size * (0.3 + 0.7 * t));
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.rotation);
+    if (this.shape === 'star') {
+      drawStar(ctx, 0, 0, s, this.color);
+    } else {
+      const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, s);
+      grad.addColorStop(0, this.color);
+      grad.addColorStop(0.4, this.color);
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(0, 0, s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+function drawStar(ctx, cx, cy, r, color) {
+  const spikes = 4;
+  const outerR = Math.max(0.5, r);
+  const innerR = Math.max(0.25, r * 0.4);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  for (let i = 0; i < spikes * 2; i++) {
+    const radius = i % 2 === 0 ? outerR : innerR;
+    const angle = (i * Math.PI) / spikes - Math.PI / 2;
+    const px = cx + Math.cos(angle) * radius;
+    const py = cy + Math.sin(angle) * radius;
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
+// ========== 粒子生成 ==========
+function spawnParticles(x, y, speed) {
+  const config = modeConfigs[currentMode];
+  const count = Math.min(particleDensity, MAX_PARTICLES - particles.length);
+  const speedFactor = Math.min(speed / 10, 3);
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const force = (Math.random() * spreadForce + 0.5) * speedFactor;
+    const vx = Math.cos(angle) * force + (Math.random() - 0.5) * 0.5;
+    const vy = Math.sin(angle) * force + (Math.random() - 0.5) * 0.5;
+    const color = config.colors[Math.floor(Math.random() * config.colors.length)];
+    const sizeVar = 1 + (Math.random() - 0.5) * config.sizeVar;
+    const size = particleSize * sizeVar * (0.5 + speedFactor * 0.3);
+    const life = particleLifetime * (0.6 + Math.random() * 0.4);
+    const finalSize = isMouseDown ? size * 1.5 : size;
+    const finalLife = isMouseDown ? life * 1.4 : life;
+    particles.push(new Particle(x, y, vx, vy, color, finalSize, finalLife, config.shape));
+  }
+}
+
+function spawnExplosion(x, y) {
+  const config = modeConfigs[currentMode];
+  const count = Math.min(60, MAX_PARTICLES - particles.length);
+  for (let i = 0; i < count; i++) {
+    const angle = (i / count) * Math.PI * 2 + Math.random() * 0.3;
+    const force = 2 + Math.random() * 6;
+    const vx = Math.cos(angle) * force;
+    const vy = Math.sin(angle) * force;
+    const color = config.colors[Math.floor(Math.random() * config.colors.length)];
+    const size = particleSize * (0.8 + Math.random() * 1.5);
+    const life = particleLifetime * (0.8 + Math.random() * 0.6);
+    particles.push(new Particle(x, y, vx, vy, color, size, life, config.shape));
+  }
+}
+
+// 静止时从轨道上偶尔释放的漂散粒子
+function spawnIdleDrift() {
+  if (particles.length >= MAX_PARTICLES - 20) return;
+  const config = modeConfigs[currentMode];
+  // 从某个随机轨道粒子位置释放
+  const op = orbitParticles[Math.floor(Math.random() * orbitParticles.length)];
+  const ox = mouseX + Math.cos(op.angle) * op.radius;
+  const oy = mouseY + Math.sin(op.angle + op.tilt) * op.radius * 0.6;
+  const angle = Math.atan2(oy - mouseY, ox - mouseX) + (Math.random() - 0.5) * 0.8;
+  const force = 0.3 + Math.random() * 0.8;
+  const vx = Math.cos(angle) * force;
+  const vy = Math.sin(angle) * force;
+  const color = config.colors[Math.floor(Math.random() * config.colors.length)];
+  const size = 1 + Math.random() * 2;
+  const life = 30 + Math.random() * 40;
+  particles.push(new Particle(ox, oy, vx, vy, color, size, life, config.shape));
+}
+
+// ========== 轨迹线段 ==========
+let trailPoints = [];
+const MAX_TRAIL_POINTS = 80;
+
+function addTrailPoint(x, y, speed) {
+  trailPoints.push({ x, y, speed, time: performance.now() });
+  if (trailPoints.length > MAX_TRAIL_POINTS) trailPoints.shift();
+}
+
+function drawTrail() {
+  if (trailPoints.length < 2) return;
+  const config = modeConfigs[currentMode];
+  const now = performance.now();
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for (let i = 1; i < trailPoints.length; i++) {
+    const p0 = trailPoints[i - 1];
+    const p1 = trailPoints[i];
+    const age = (now - p1.time) / (particleLifetime * 16.67);
+    if (age > 1) continue;
+    const t = 1 - age;
+    const alpha = t * t * 0.4;
+    const width = Math.max(0.5, (p1.speed / 15) * particleSize * 0.6 * t);
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = config.colors[i % config.colors.length];
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(p0.x, p0.y);
+    ctx.lineTo(p1.x, p1.y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ========== 鼠标光晕 ==========
+function drawMouseGlow() {
+  const config = modeConfigs[currentMode];
+  const glowSize = 80 + mouseSpeed * 3;
+  ctx.save();
+  const grad = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, glowSize);
+  grad.addColorStop(0, config.glowColor);
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(mouseX, mouseY, glowSize, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+// ========== 静止时轨道动效 ==========
+function drawOrbitRings(idleFactor) {
+  // idleFactor: 0->1，静止越久越明显
+  const config = modeConfigs[currentMode];
+  const alpha = Math.min(idleFactor, 1);
+
+  ctx.save();
+
+  // 绘制轨道环线（淡）
+  for (let ring = 0; ring < ORBIT_COUNT; ring++) {
+    const radius = 50 + ring * 35;
+    const tilt = (ring * 0.4) - 0.4;
+    ctx.globalAlpha = alpha * 0.04;
+    ctx.strokeStyle = config.cursorColor;
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.ellipse(mouseX, mouseY, radius, radius * 0.6, tilt, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // 绘制轨道粒子
+  for (const op of orbitParticles) {
+    op.angle += op.speed;
+
+    // 椭圆轨道，带倾斜
+    const cosT = Math.cos(op.tilt);
+    const sinT = Math.sin(op.tilt);
+    const ex = Math.cos(op.angle) * op.radius;
+    const ey = Math.sin(op.angle) * op.radius * 0.6;
+    const px = mouseX + ex * cosT - ey * sinT;
+    const py = mouseY + ex * sinT + ey * cosT;
+
+    // 呼吸闪烁
+    const flicker = 0.5 + 0.5 * Math.sin(globalTime * 0.03 + op.phaseOffset);
+    const pAlpha = alpha * (0.3 + 0.5 * flicker);
+    const pSize = Math.max(0.5, op.size * (0.7 + 0.3 * flicker));
+
+    ctx.globalAlpha = pAlpha;
+
+    // 发光点
+    const grad = ctx.createRadialGradient(px, py, 0, px, py, pSize * 2.5);
+    grad.addColorStop(0, config.colors[op.ring % config.colors.length]);
+    grad.addColorStop(0.5, config.orbitColor + (0.3 * flicker).toFixed(2) + ')');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(px, py, pSize * 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 核心亮点
+    ctx.globalAlpha = pAlpha * 1.5;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(px, py, Math.max(0.3, pSize * 0.4), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+// ========== 呼吸脉冲环 ==========
+function drawPulseRings(idleFactor) {
+  const config = modeConfigs[currentMode];
+  const alpha = Math.min(idleFactor, 1);
+  ctx.save();
+
+  // 多层脉冲环，不同相位
+  for (let i = 0; i < 3; i++) {
+    const phase = globalTime * 0.015 + i * (Math.PI * 2 / 3);
+    const t = (Math.sin(phase) + 1) / 2; // 0~1
+    const radius = 20 + t * 60;
+    const ringAlpha = alpha * (1 - t) * 0.2;
+
+    ctx.globalAlpha = ringAlpha;
+    ctx.strokeStyle = config.cursorColor;
+    ctx.lineWidth = 1.5 * (1 - t);
+    ctx.beginPath();
+    ctx.arc(mouseX, mouseY, Math.max(1, radius), 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+// ========== 背景环境粒子 ==========
+function updateAndDrawAmbient() {
+  const config = modeConfigs[currentMode];
+  ctx.save();
+
+  for (const p of ambientParticles) {
+    // 缓慢漂移
+    p.x += p.vx;
+    p.y += p.vy;
+
+    // 呼吸闪烁
+    const flicker = 0.5 + 0.5 * Math.sin(globalTime * p.freq + p.phase);
+    const alpha = p.alpha * flicker;
+
+    // 边界循环
+    if (p.x < -10) p.x = W + 10;
+    if (p.x > W + 10) p.x = -10;
+    if (p.y < -10) p.y = H + 10;
+    if (p.y > H + 10) p.y = -10;
+
+    // 鼠标附近微微被吸引
+    const dx = mouseX - p.x;
+    const dy = mouseY - p.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 200 && dist > 1) {
+      p.vx += dx / dist * 0.003;
+      p.vy += dy / dist * 0.003;
+    }
+    // 速度阻尼
+    p.vx *= 0.998;
+    p.vy *= 0.998;
+
+    ctx.globalAlpha = alpha;
+    const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, Math.max(0.5, p.size * 3));
+    grad.addColorStop(0, config.ambientColor + '0.6)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, Math.max(0.5, p.size * 3), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+// ========== 环境粒子间连线 ==========
+function drawAmbientConnections() {
+  const config = modeConfigs[currentMode];
+  ctx.save();
+  for (let i = 0; i < ambientParticles.length; i++) {
+    for (let j = i + 1; j < ambientParticles.length; j++) {
+      const a = ambientParticles[i];
+      const b = ambientParticles[j];
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 120) {
+        const alpha = (1 - dist / 120) * 0.04;
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = config.cursorColor;
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+      }
+    }
+  }
+  ctx.restore();
+}
+
+// ========== 中心能量核心（静止时） ==========
+function drawEnergyCore(idleFactor) {
+  const config = modeConfigs[currentMode];
+  const alpha = Math.min(idleFactor, 1);
+  const pulse = 0.7 + 0.3 * Math.sin(globalTime * 0.04);
+  const coreSize = 12 * pulse;
+
+  ctx.save();
+
+  // 外层大光晕
+  ctx.globalAlpha = alpha * 0.15 * pulse;
+  const g1 = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, Math.max(1, coreSize * 5));
+  g1.addColorStop(0, config.cursorColor);
+  g1.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g1;
+  ctx.beginPath();
+  ctx.arc(mouseX, mouseY, Math.max(1, coreSize * 5), 0, Math.PI * 2);
+  ctx.fill();
+
+  // 内层亮核
+  ctx.globalAlpha = alpha * 0.5 * pulse;
+  const g2 = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, Math.max(1, coreSize));
+  g2.addColorStop(0, '#ffffff');
+  g2.addColorStop(0.3, config.cursorColor);
+  g2.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g2;
+  ctx.beginPath();
+  ctx.arc(mouseX, mouseY, Math.max(1, coreSize), 0, Math.PI * 2);
+  ctx.fill();
+
+  // 旋转光芒线
+  const rayCount = 6;
+  for (let i = 0; i < rayCount; i++) {
+    const angle = (i / rayCount) * Math.PI * 2 + globalTime * 0.01;
+    const len = coreSize * (2 + Math.sin(globalTime * 0.05 + i) * 0.8);
+    ctx.globalAlpha = alpha * 0.12 * pulse;
+    ctx.strokeStyle = config.cursorColor;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(
+      mouseX + Math.cos(angle) * coreSize * 0.5,
+      mouseY + Math.sin(angle) * coreSize * 0.5
+    );
+    ctx.lineTo(
+      mouseX + Math.cos(angle) * len,
+      mouseY + Math.sin(angle) * len
+    );
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+// ========== 主循环 ==========
+function animate() {
+  requestAnimationFrame(animate);
+  globalTime++;
+
+  // 半透明覆盖实现拖尾
+  ctx.fillStyle = 'rgba(10, 10, 15, 0.12)';
+  ctx.fillRect(0, 0, W, H);
+
+  // 背景环境粒子（始终绘制）
+  updateAndDrawAmbient();
+  drawAmbientConnections();
+
+  // 轨迹线
+  drawTrail();
+
+  // 鼠标光晕
+  drawMouseGlow();
+
+  // 判断静止状态
+  if (isMoving) {
+    idleTime = 0;
+  } else {
+    idleTime++;
+  }
+  const idleFactor = Math.max(0, (idleTime - 10) / 30); // 渐入因子
+
+  // 静止时的循环动效
+  if (idleFactor > 0) {
+    drawOrbitRings(idleFactor);
+    drawPulseRings(idleFactor);
+    drawEnergyCore(idleFactor);
+
+    // 偶尔释放漂散粒子
+    if (globalTime % 4 === 0 && idleFactor > 0.5) {
+      spawnIdleDrift();
+    }
+  }
+
+  // 更新和绘制轨迹粒子
+  const config = modeConfigs[currentMode];
+  particles = particles.filter(p => {
+    const alive = p.update(config);
+    if (alive) p.draw(ctx);
+    return alive;
+  });
+
+  // 清理过老的轨迹点
+  const now = performance.now();
+  const maxAge = particleLifetime * 16.67;
+  trailPoints = trailPoints.filter(p => now - p.time < maxAge);
+
+  // FPS
+  frameCount++;
+  if (now - lastFpsTime >= 500) {
+    currentFps = Math.round(frameCount / ((now - lastFpsTime) / 1000));
+    frameCount = 0;
+    lastFpsTime = now;
+  }
+
+  document.getElementById('statCount').textContent = particles.length;
+  document.getElementById('statFps').textContent = currentFps;
+  document.getElementById('statSpeed').textContent = mouseSpeed.toFixed(1);
+}
+
+// ========== 鼠标事件 ==========
+const cursorDot = document.getElementById('cursorDot');
+const cursorRing = document.getElementById('cursorRing');
+let ringX = mouseX, ringY = mouseY;
+
+function updateCursorStyle() {
+  const config = modeConfigs[currentMode];
+  cursorDot.style.background = config.cursorColor;
+  cursorDot.style.boxShadow = `0 0 15px ${config.cursorColor}, 0 0 40px ${config.cursorGlow}`;
+  cursorRing.style.borderColor = config.ringColor;
+}
+
+document.addEventListener('mousemove', (e) => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+  if (!hasInteracted) {
+    hasInteracted = true;
+    document.getElementById('hint').classList.add('hidden');
+  }
+  cursorDot.style.left = mouseX + 'px';
+  cursorDot.style.top = mouseY + 'px';
+});
+
+document.addEventListener('mousedown', (e) => {
+  isMouseDown = true;
+  cursorDot.classList.add('clicking');
+  cursorRing.classList.add('clicking');
+  spawnExplosion(e.clientX, e.clientY);
+});
+document.addEventListener('mouseup', () => {
+  isMouseDown = false;
+  cursorDot.classList.remove('clicking');
+  cursorRing.classList.remove('clicking');
+});
+
+function updateCursorRing() {
+  ringX += (mouseX - ringX) * 0.15;
+  ringY += (mouseY - ringY) * 0.15;
+  cursorRing.style.left = ringX + 'px';
+  cursorRing.style.top = ringY + 'px';
+  requestAnimationFrame(updateCursorRing);
+}
+updateCursorRing();
+
+// 触摸支持
+document.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  const touch = e.touches[0];
+  mouseX = touch.clientX;
+  mouseY = touch.clientY;
+  cursorDot.style.left = mouseX + 'px';
+  cursorDot.style.top = mouseY + 'px';
+  if (!hasInteracted) { hasInteracted = true; document.getElementById('hint').classList.add('hidden'); }
+}, { passive: false });
+document.addEventListener('touchstart', (e) => {
+  const touch = e.touches[0];
+  isMouseDown = true;
+  mouseX = touch.clientX; mouseY = touch.clientY;
+  spawnExplosion(mouseX, mouseY);
+});
+document.addEventListener('touchend', () => { isMouseDown = false; });
+
+// ========== 粒子生成循环 ==========
+function spawnLoop() {
+  requestAnimationFrame(spawnLoop);
+  const dx = mouseX - prevMouseX;
+  const dy = mouseY - prevMouseY;
+  mouseSpeed = Math.sqrt(dx * dx + dy * dy);
+  isMoving = mouseSpeed > 1.5;
+
+  if (isMoving) {
+    const steps = Math.max(1, Math.floor(mouseSpeed / 8));
+    for (let i = 0; i < steps; i++) {
+      const t = (i + 1) / steps;
+      const ix = prevMouseX + dx * t;
+      const iy = prevMouseY + dy * t;
+      spawnParticles(ix, iy, mouseSpeed);
+    }
+    addTrailPoint(mouseX, mouseY, mouseSpeed);
+  }
+  if (isMouseDown) spawnParticles(mouseX, mouseY, 3);
+
+  prevMouseX = mouseX;
+  prevMouseY = mouseY;
+}
+spawnLoop();
+
+// ========== 控制面板 ==========
+document.querySelectorAll('.mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentMode = btn.dataset.mode;
+    updateCursorStyle();
+    const config = modeConfigs[currentMode];
+    document.documentElement.style.setProperty('--accent', config.cursorColor);
+    document.documentElement.style.setProperty('--glow', config.cursorGlow);
+  });
+});
+
+document.getElementById('density').addEventListener('input', function() {
+  particleDensity = parseInt(this.value);
+  document.getElementById('densityVal').textContent = particleDensity;
+});
+document.getElementById('lifetime').addEventListener('input', function() {
+  particleLifetime = parseInt(this.value);
+  document.getElementById('lifetimeVal').textContent = particleLifetime;
+});
+document.getElementById('psize').addEventListener('input', function() {
+  particleSize = parseInt(this.value);
+  document.getElementById('sizeVal').textContent = particleSize;
+});
+document.getElementById('spread').addEventListener('input', function() {
+  spreadForce = parseInt(this.value) / 10;
+  document.getElementById('spreadVal').textContent = spreadForce.toFixed(1);
+});
+
+document.getElementById('btnClear').addEventListener('click', () => {
+  particles = [];
+  trailPoints = [];
+  ctx.fillStyle = 'rgba(10, 10, 15, 1)';
+  ctx.fillRect(0, 0, W, H);
+});
+
+const panel = document.getElementById('panel');
+const toggleBtn = document.getElementById('togglePanel');
+document.getElementById('btnHide').addEventListener('click', () => {
+  panel.classList.add('collapsed');
+  toggleBtn.classList.add('visible');
+});
+toggleBtn.addEventListener('click', () => {
+  panel.classList.remove('collapsed');
+  toggleBtn.classList.remove('visible');
+});
+
+panel.addEventListener('mousemove', (e) => e.stopPropagation());
+toggleBtn.addEventListener('mousemove', (e) => e.stopPropagation());
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'c' || e.key === 'C') document.getElementById('btnClear').click();
+  if (e.key === 'h' || e.key === 'H') {
+    if (panel.classList.contains('collapsed')) toggleBtn.click();
+    else document.getElementById('btnHide').click();
+  }
+  const modes = ['flame', 'stardust', 'neon', 'aurora', 'ink', 'galaxy'];
+  const num = parseInt(e.key);
+  if (num >= 1 && num <= 6) {
+    const btn = document.querySelector(`.mode-btn[data-mode="${modes[num - 1]}"]`);
+    if (btn) btn.click();
+  }
+});
+
+// ========== 启动 ==========
+updateCursorStyle();
+animate();
+</script>
+</body>
+</html>
